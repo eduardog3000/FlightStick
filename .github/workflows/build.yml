@@ -1,0 +1,63 @@
+name: Build
+
+env:
+  GH_TOKEN: ${{github.token}}
+  Branch: ${{github.ref_name}}
+  Configuration: Release
+  Artifacts: bin/Release/
+  Solution: ${{github.event.repository.name}}.sln
+
+on:
+  push:
+    Branches: $Branch
+  pull_request:
+    Branches: $Branch
+  workflow_dispatch:
+
+jobs:
+  Windows:
+    runs-on: windows-2022
+    steps:
+
+    - name: Clone repo and submodules
+      run: git clone --recurse-submodules https://${{github.repository_owner}}:${{github.token}}@github.com/${{github.repository}}.git "${{github.workspace}}" --branch ${{env.Branch}}
+
+    - name: Download dependencies
+      run: |
+        MkDir "${{github.workspace}}/bin/Release"
+        curl -L https://github.com/eduardog3000/JoystickLibrary/releases/download/2024-02-03/JoystickLibrarySharp.dll -o "${{github.workspace}}/bin/Release/JoystickLibrarySharp.dll"
+        curl -L https://github.com/scripthookvdotnet/scripthookvdotnet/releases/download/v3.6.0/ScriptHookVDotNet.zip -o "${{github.workspace}}/bin/ScriptHookVDotNet.zip"
+        7z x "${{github.workspace}}/bin/ScriptHookVDotNet.zip" -o${{github.workspace}}/bin/Release
+
+    - name: Get current date, commit hash and count
+      run: |
+        echo "CommitDate=$(git show -s --date=format:'%Y-%m-%d' --format=%cd)" >> $env:GITHUB_ENV
+        echo "CommitHashShort=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_ENV
+        echo "CommitCount=$(git rev-list --count HEAD)" >> $env:GITHUB_ENV
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v1.0.2
+
+    - name: Build
+      run: msbuild /m "${{env.Solution}}" /p:Configuration="${{env.Configuration}}"
+
+    - name: Upload Installer Artifact to GitHub
+      uses: actions/upload-artifact@v4
+      with:
+        name: "${{github.event.repository.name}}_r${{env.CommitCount}}@${{env.CommitHashShort}}"
+        path: "${{github.workspace}}/${{env.Artifacts}}"
+
+    - name: Compress artifacts
+      uses: vimtor/action-zip@v1.1
+      with:
+        files: '${{env.Artifacts}}'
+        dest: "build/${{github.event.repository.name}}_r${{env.CommitCount}}@${{env.CommitHashShort}}.zip"
+
+    - name: GitHub pre-release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        repo_token: "${{secrets.GITHUB_TOKEN}}"
+        automatic_release_tag: "latest"
+        prerelease: true
+        title: "[${{env.CommitDate}}] ${{github.event.repository.name}} r${{env.CommitCount}}@${{env.CommitHashShort}}"
+        files: "build/${{github.event.repository.name}}_r${{env.CommitCount}}@${{env.CommitHashShort}}.zip"
